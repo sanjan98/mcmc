@@ -6,7 +6,7 @@ License: MIT
 import numpy as np
 import functools
 import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D
+# from mpl_toolkits.mplot3d import Axes3D
 import matplotlib
 import scipy
 from scipy import stats
@@ -159,7 +159,7 @@ def scatter_matrix(samples, #list of chains
     cmuse = cm.get_cmap(name='tab10')
 
     # fig = plt.figure(constrained_layout=True)
-    fig = plt.figure()
+    fig = plt.figure(figsize=(18,10))
     if upper_right is None:
         gs = GridSpec(dim, dim, figure=fig)
         axs = [None]*dim*dim
@@ -175,7 +175,6 @@ def scatter_matrix(samples, #list of chains
 
     # print("mins = ", mins)
     # print("maxs = ", maxs)
-
     for ii in range(dim):
         # print("ii = ", ii)
         axs[ii] = fig.add_subplot(gs[ii+start, ii])
@@ -240,7 +239,9 @@ def scatter_matrix(samples, #list of chains
                     ax.hist2d(samples[kk][:, ii], samples[kk][:, jj],
                               bins=nbins,
                               norm=mcolors.PowerNorm(gamma),
-                              density=True)
+                              density=True,
+                              cmap=plt.cm.jet)
+                    # ax.tick_params(axis='x', which='major', labelsize=6)
                 else:
                     ax.plot(samples[kk][:, ii], samples[kk][:, jj], 'o', ms=1, alpha=gamma)
 
@@ -434,7 +435,10 @@ def batch_normal_sample(mean, cov, size: "tuple | int" = ()):
     shape = size + np.broadcast_shapes(mean.shape, cov.shape[:-1])
     X = np.random.standard_normal((*shape, 1)).astype(np.float32)
     L = np.linalg.cholesky(cov)
-    return (L @ X).reshape(shape) + mean
+    sample = (L @ X).reshape(shape) + mean
+    if dim == 1:
+        sample = np.squeeze(sample, axis=-1)
+    return sample
 
 def normal_sample(mean, cov, nsamples=1):
     """Generate nsamples from a multivariate Normal distribution
@@ -481,7 +485,7 @@ def plot_banana():
                  eval_func_on_grid(compose(np.exp, banana_logpdf), 
                                    xgrid, ygrid).T)
     
-def laplace_approx(x0, logpost):
+def laplace_approx(x0, logpost, optmethod):
     """Perform the laplace approximation, returning the MAP point and an approximation of the covariance
     :param x0: (nparam, ) array of initial parameters
     :param logpost: f(param) -> log posterior pdf
@@ -490,16 +494,21 @@ def laplace_approx(x0, logpost):
     :returns cov_approx: (nparam, nparam), covariance matrix for Gaussian fit at MAP
     """
     # Gradient free method to obtain optimum
-    neg_post = lambda x: -logpost(x)
-    res = scipy.optimize.minimize(neg_post, x0, method='Nelder-Mead')
-
+    neg_post = lambda x: -logpost(x,0)[0]
+    # neg_post = lambda x: -logpost(x)
+    res = scipy.optimize.minimize(neg_post, x0)#, method=optmethod)#, tol=1e-6, options={'maxiter': 100, 'disp': True})
+    print('----------------------------------------------------------------------------')
+    print('----------------------------------------------------------------------------')
+    print('--------------------First optimization done---------------------------------')
+    print('----------------------------------------------------------------------------')
+    print('----------------------------------------------------------------------------')
     # Gradient method which also approximates the inverse of the hessian
-    res = scipy.optimize.minimize(neg_post, res.x*0.95)
+    res = scipy.optimize.minimize(neg_post, res.x*0.95, method=optmethod)#, tol=1e-4, options={'maxiter': 20, 'disp': True})
     map_point = res.x
     cov_approx = res.hess_inv
     return map_point, cov_approx
 
-def log_banana(x):
+def log_banana(x,co):
     if (len(x.shape) == 1):
         x = x[np.newaxis, :]
     N, d = x.shape
@@ -512,4 +521,42 @@ def log_banana(x):
     diff = xp - np.tile(mu[np.newaxis, :], (N, 1))
     sol = np.linalg.solve(sigma, diff.T)
     inexp = np.einsum("ij,ij->j", diff.T, sol)
-    return np.log(preexp) - 0.5 * inexp
+    co+=1
+    return np.log(preexp) - 0.5 * inexp, co
+
+def lognormpdf_univariate(x, mean, cov):
+    """Compute the log pdf of a univariate Normal distribution
+    
+    Inputs
+    ------
+    x : (float) variable of interest
+    mean : (float) mean of the distribution
+    cov  : (float) covariance of the distribution
+    
+    Returns
+    -------
+    logpdf: (float) log pdf value
+    """
+
+    preexp = 1.0 / (2.0 * np.pi)**(0.5) / (cov)**0.5
+    diff = x - mean
+    inexp = diff**2/cov
+    logpdf = np.log(preexp) - 0.5 * inexp
+    return logpdf
+
+def invgamma_univariate(x, alpha, beta):
+    """Compute the log pdf of a univariate Inverse Gamma distribution
+    
+    Inputs
+    ------
+    x : (float) variable of interest
+    alpha : (float) shape parameter
+    beta  : (float) scale parameter
+    
+    Returns
+    -------
+    logpdf: (float) log pdf value
+    """
+
+    logpdf = alpha*np.log(beta) - scipy.special.gammaln(alpha) - (alpha+1)*np.log(x) - beta/x
+    return logpdf

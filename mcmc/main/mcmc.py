@@ -2,49 +2,43 @@
 mcmc - Python code performing Markov Charin Monte Carlo and it's variants (delayed, adaptive and dram)
 
 """
-
-# =============================================================================
 # Imports
-# =============================================================================
-
 import numpy as np
 from numpy.linalg.linalg import LinAlgError
 
-### MH Acceptance ratio
-
-def mh_acceptance_prob(current_target_logpdf,proposed_target_logpdf, current_sample, proposed_sample, proposal_func, cov):
+# Metropolis Hastings Acceptance ratio
+def mh_acceptance_prob(current_logpdf: float, proposed_logpdf: float, current_sample: np.ndarray, proposed_sample: np.ndarray, proposal_pdf: callable, cov: np.ndarray) -> float:
     """Compute the metropolis-hastings accept-reject probability
     
     Inputs
     ------
-    current_target_logpdf : float, logpdf at the current sample in the chain f_X(x^{(k)})
-    proposed_target_logpdf : float, logpdf at the proposed sample in the chain
+    current_logpdf : float, logpdf of the current sample
+    proposed_logpdf : float, logpdf of the proposed sample
     current_sample : (d, ), current sample
     proposed_sample : (d, ), proposed sample
-    proposal_func: f(x, y) callable that gives the log probability of y given x
+    proposal_pdf: f(x, y) -> float callable that gives the log probability of y given x
     cov: (d, d), covariance of the proposal distribution
     
     Returns
     -------
     acceptance probability
     """
-    prop_reverse = proposal_func(current_sample, proposed_sample, cov)
-    prop_forward = proposal_func(proposed_sample, current_sample, cov)
-    check = proposed_target_logpdf - current_target_logpdf + prop_reverse - prop_forward
+    prop_reverse = proposal_pdf(current_sample, proposed_sample, cov)
+    prop_forward = proposal_pdf(proposed_sample, current_sample, cov)
+    check = proposed_logpdf - current_logpdf + prop_reverse - prop_forward
     if check < 0:
         return np.exp(check)
     else:
-        return 1      
+        return 1    
     
 ### MH Delayed Acceptance ratio
     
-def mh_acceptance_prob_delay(current_target_logpdf, proposed_target_logpdf, proposed_target2_logpdf, 
-                             current_sample, proposed_sample, proposed_sample2, proposal_func, cov):
+def delay_acceptance_prob(current_logpdf: float, proposed_logpdf: float, proposed2_logpdf: float, current_sample: np.ndarray, proposed_sample: np.ndarray, proposed_sample2: np.ndarray, proposal_func: callable, cov: np.ndarray) -> float:
     """Compute the metropolis-hastings accept-reject probability
     
     Inputs
     ------
-    current_target_logpdf : float, logpdf at the current sample in the chain f_X(x^{(k)})
+    current_logpdf : float, logpdf of the current sample
     proposed_target_logpdf : float, logpdf at the proposed sample in the chain
     proposed_target2_logpdf : float, logpdf at the second (delayed) proposed sample in the chain
     current_sample : (d, ), current sample
@@ -58,95 +52,111 @@ def mh_acceptance_prob_delay(current_target_logpdf, proposed_target_logpdf, prop
     acceptance probability
     """
     
-    prop_reverse = proposal_func(proposed_sample, proposed_sample2, cov)
-    prop_forward = proposal_func(proposed_sample, current_sample, cov)
-
-    a1 = mh_acceptance_prob(proposed_target2_logpdf, proposed_target_logpdf, proposed_sample2, proposed_sample, proposal_func, cov)
-    a2 = mh_acceptance_prob(current_target_logpdf, proposed_target_logpdf, current_sample, proposed_sample, proposal_func, cov)
-
-    if a1 == 1:
-        return 0
-    if a2 == 1:
-        return 1
+    # prop_reverse = proposal_func(proposed_sample, proposed_sample2, cov)
+    # prop_forward = proposal_func(proposed_sample, current_sample, cov)
     
-    check = proposed_target2_logpdf - current_target_logpdf + prop_reverse - prop_forward + np.log(1-a1) - np.log(1-a2)
-    if check < 0:
-        return np.exp(check)
-    else:
-        return 1      
+    a21 = mh_acceptance_prob(proposed2_logpdf, proposed_logpdf, proposed_sample2, proposed_sample, proposal_func, cov)
+    if a21 > 1.0-1e-15: # reject because current is more likely
+        return 0
+    
+    prop_pdf_num = proposal_func(proposed_sample2, proposed_sample, cov)
+    prop_pdf_den = proposal_func(current_sample, proposed_sample, cov)
+
+    a2 = proposed2_logpdf - current_logpdf + prop_pdf_num - prop_pdf_den + np.log(1.0-a21) - np.log(1.0 - min(1, np.exp(proposed_logpdf - current_logpdf)))
+
+    if a2 < 0:
+        return np.exp(a2)
+    else:    
+        return 1
+
+    # a1 = mh_acceptance_prob(proposed2_logpdf, proposed_logpdf, proposed_sample2, proposed_sample, proposal_func, cov)
+    # a2 = mh_acceptance_prob(current_logpdf, proposed_logpdf, current_sample, proposed_sample, proposal_func, cov)
+
+    # if a1 == 1:
+    #     return 0
+    # if a2 == 1:
+    #     return 1
+    
+    # check = proposed2_logpdf - current_logpdf + prop_reverse - prop_forward + np.log(1-a1) - np.log(1-a2)
+    # if check < 0:
+    #     return np.exp(check)
+    # else:
+    #     return 1      
 
 ### DRAM Algo
     
-def dram(starting_sample, proposal_cov, num_samples, target_logpdf, proposal_logpdf, proposal_sampler, adaptive=True, delayed =True,
-         k0=100, gamma=0.5):
+def dram(starting_sample: np.ndarray, cov: np.ndarray, num_samples: int, target_logpdf: callable, proposal_logpdf: callable, sampler: callable, adaptive: bool, delayed: bool, k0: int = 100, gamma: float = 0.5, cost: int = 0):
     """Delayed Adaaptive Metropolis-Hastings MCMC
     
     Inputs
     ------
     starting_sample: (d, ) the initial sample
-    proposal_cov: (d, d) proposal covariance
-    num_sample: positive integer, the number of total samples
-    target_logpdf: function(x) -> logpdf of the target distribution
-    proposal_logpdf: function (x, y) -> logpdf of proposing y if current sample is x
+    cov: (d, d) proposal covariance
+    num_samples: positive integer, the number of total samples
+    target_logpdf: function(x) -> float, logpdf of the target distribution
+    proposal_logpdf: function (x, y) -> float, logpdf of proposing y if current sample is x
     proposal_sampler: function (x) -> y, generate a sample if you are currently at x
     adaptive, delayed: (logic) Switches for the Adaptive and Delayed Algo
     k0: Number of steps to wait until adaptation kicks in
     gamma: Hyper paramater multiplying the covariance in the delayed algo
+    cost: int, sequential cost of the target logpdf
     
     Returns
     -------
     Samples: (num_samples, d) array of samples
     accept_ratio: ratio of proposed samples that were accepted
+    Covariance: (num_samples, d, d) history of covariance matrix
     """
+    if isinstance(starting_sample, float)==True or isinstance(starting_sample, int)==True:
+        raise ValueError("Starting sample should be an array not a float or int")
+    else:
+        # Get dimension of the problem
+        dim = starting_sample.shape[0]
 
-    d = starting_sample.shape[0]
-    samples = np.zeros((num_samples, d))
+    samples = np.zeros((num_samples, dim))
     samples[0, :] = starting_sample
-    current_target_logpdf = target_logpdf(samples[0, :])
+    
+    current_logpdf, cost = target_logpdf(samples[0, :],cost)
     current_mean = starting_sample
-    current_cov = proposal_cov
+    current_cov = cov
     
     num_accept = 0
 
+    # Adaptation parameters (hardcoded for now)
     eps = 1e-7
-    sd = (2.4**2/d)
+    sd = (2.4**2/dim)
 
     for ii in range(1, num_samples):
-        # Check covariance condition
-        if not is_positive_definite(current_cov):
-            print(f'Caught non-positive definite matrix: {current_cov}')
-            current_cov = nearest_positive_definite(current_cov)
         
         # propose
-        proposed_sample = proposal_sampler(samples[ii-1, :], current_cov)
-        proposed_target_logpdf = target_logpdf(proposed_sample)
-        
+        proposed_sample = sampler(samples[ii-1, :], current_cov)
+        proposed_logpdf, cost = target_logpdf(proposed_sample, cost)
+
         # determine acceptance probability
-        a = mh_acceptance_prob(current_target_logpdf, proposed_target_logpdf, samples[ii-1,:], proposed_sample, proposal_logpdf, current_cov)
+        a = mh_acceptance_prob(current_logpdf, proposed_logpdf, samples[ii-1,:], proposed_sample, proposal_logpdf, current_cov)
         
         # Accept or reject the sample
         u = np.random.rand()
-        if a == 1 or u < a: #Accept
-            samples[ii, :] = proposed_sample
-            current_target_logpdf = proposed_target_logpdf
+        if a == 1 or u < a: # Accept
+            samples[ii, :] = proposed_sample # Update the sample
+            current_logpdf = proposed_logpdf # Update the logpdf
             num_accept += 1
         else:
             # Check if delayed is true
             if delayed:
                 # second level proposal
                 delayed_cov = current_cov*gamma
-                proposed_sample2 = proposal_sampler(samples[ii-1, :], delayed_cov)
-                proposed_target2_logpdf = target_logpdf(proposed_sample2)
+                proposed_sample2 = sampler(samples[ii-1, :], delayed_cov)
+                proposed2_logpdf, cost = target_logpdf(proposed_sample2,cost)
 
                 # Accept or reject the second sample based on delayed acceptance probability
-                a_delay = mh_acceptance_prob_delay(current_target_logpdf, proposed_target_logpdf, proposed_target2_logpdf, 
-                            samples[ii-1,:], proposed_sample, proposed_sample2, proposal_logpdf, delayed_cov)
+                a_delay = delay_acceptance_prob(current_logpdf, proposed_logpdf, proposed2_logpdf, samples[ii-1,:], proposed_sample, proposed_sample2, proposal_logpdf, delayed_cov)
                 
                 # Accept or reject the sample based on delayed acceptance prob
                 u = np.random.rand()
                 if a_delay == 1 or u < a_delay: #accept
                     samples[ii, :] = proposed_sample2
-                    current_target_logpdf = proposed_target2_logpdf
+                    current_logpdf = proposed2_logpdf
                     num_accept += 1
                 else: # reject
                     samples[ii, :] = samples[ii-1, :]
@@ -158,21 +168,31 @@ def dram(starting_sample, proposal_cov, num_samples, target_logpdf, proposal_log
         if adaptive:
             # Update the sample mean every iteration!
             xbar_minus = current_mean.copy()
-            current_mean = (1/(ii+1)) * samples[ii-1, :] + (ii/(ii+1))*xbar_minus
+            new_mean = (current_mean*ii + samples[ii, :]) / (ii+1)
 
             # Start adapting covariance after k0 steps
             if ii >= k0:
                 k = ii
                 x = samples[ii, :]
                 xk = x[:, np.newaxis]
-                xbark = current_mean[:, np.newaxis]
+                xbark = new_mean[:, np.newaxis]
                 xbark_minus = xbar_minus[:, np.newaxis]
                 current_cov = (k-1)/k * current_cov + sd/k * \
                               (k * np.multiply(xbar_minus.T, xbark_minus) - 
                                (k+1) * np.multiply(xbark.T, xbark) + np.multiply(xk.T, xk) + 
-                               eps * np.eye(d))
-           
-    return samples, num_accept / float(num_samples-1)
+                               eps * np.eye(dim))
+                current_mean = new_mean
+                
+        if np.mod(ii,100) == 0:
+        #     print("-------------------------------------------------")
+        #     print("-------------------------------------------------")
+            print(f"-------------------In Iteration {ii}--------------")
+        #     np.savetxt(f'samples_{ii}.csv', samples, delimiter=",")
+        #     np.savetxt(f"covariance_{ii}.csv", current_cov, delimiter=",")
+        #     print("-------------------------------------------------")
+        #     print("-------------------------------------------------")
+        #     print("-------------------------------------------------")
+    return samples, num_accept / float(num_samples-1), cost
 
 ## Additional Functions
 
