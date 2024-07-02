@@ -3,7 +3,7 @@ Example script to test MHMCMC and its variants on a multivariate Gaussian or a b
 """
 
 # Imports
-import sys
+import os
 import mcmc.utils.mcmc_utils_and_plot as utils
 import mcmc.main.mcmc as mc
 import numpy as np
@@ -38,10 +38,12 @@ def main(target):
     prop_sampler = lambda x,cov: utils.normal_sample(x,cov) 
     prop_logpdf = lambda x,y,cov: utils.lognormpdf(x,y,cov)
 
+    # Create a folder to save everything
+    os.makedirs("results", exist_ok=True)
 
     # DRAM sampler
-    samples, ar, cost = mc.dram(map, prop_cov, num_samples, target_logpdf, prop_logpdf, 
-                          prop_sampler, adaptive=True, delayed=True, k0=100, gamma=0.5) 
+    samples, covariance, ar, cost = mc.dram(map, prop_cov, num_samples, target_logpdf, prop_logpdf, 
+                          prop_sampler, output_fname="results") 
     print("Accepted Samples Ratio:", ar)
     print("Cost:", cost)
 

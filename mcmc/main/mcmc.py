@@ -5,6 +5,7 @@ mcmc - Python code performing Markov Charin Monte Carlo and it's variants (delay
 # Imports
 import numpy as np
 from numpy.linalg.linalg import LinAlgError
+from typing import Tuple
 
 # Metropolis Hastings Acceptance ratio
 def mh_acceptance_prob(current_logpdf: float, proposed_logpdf: float, current_sample: np.ndarray, proposed_sample: np.ndarray, proposal_pdf: callable, cov: np.ndarray) -> float:
@@ -85,27 +86,30 @@ def delay_acceptance_prob(current_logpdf: float, proposed_logpdf: float, propose
 
 ### DRAM Algo
     
-def dram(starting_sample: np.ndarray, cov: np.ndarray, num_samples: int, target_logpdf: callable, proposal_logpdf: callable, sampler: callable, adaptive: bool, delayed: bool, k0: int = 100, gamma: float = 0.5, cost: int = 0):
-    """Delayed Adaaptive Metropolis-Hastings MCMC
+def dram(starting_sample: np.ndarray, cov: np.ndarray, num_samples: int, target_logpdf: callable, proposal_logpdf: callable, sampler: callable, output_fname: str, adaptive: bool = True, delayed: bool = True, k0: int = 100, gamma: float = 0.5, cost: int = 0, save_counter: int = 100) -> Tuple[np.ndarray, float, np.ndarray, int]:
+    """Delayed Rejection Adaptive Metropolis-Hastings MCMC (DRAM MCMC)
     
     Inputs
     ------
     starting_sample: (d, ) the initial sample
     cov: (d, d) proposal covariance
     num_samples: positive integer, the number of total samples
-    target_logpdf: function(x) -> float, logpdf of the target distribution
+    target_logpdf: function(x) -> (float, int), logpdf of the target distribution and cost of the target logpdf
     proposal_logpdf: function (x, y) -> float, logpdf of proposing y if current sample is x
     proposal_sampler: function (x) -> y, generate a sample if you are currently at x
+    output_fname: str, name of the file to save the samples and covariance
     adaptive, delayed: (logic) Switches for the Adaptive and Delayed Algo
     k0: Number of steps to wait until adaptation kicks in
     gamma: Hyper paramater multiplying the covariance in the delayed algo
     cost: int, sequential cost of the target logpdf
+    save_counter: int, save the samples and covariance every save_counter iterations (for restart)
     
     Returns
     -------
     Samples: (num_samples, d) array of samples
-    accept_ratio: ratio of proposed samples that were accepted
     Covariance: (num_samples, d, d) history of covariance matrix
+    accept_ratio: ratio of proposed samples that were accepted
+    cost: int, cost of the whole algorithm
     """
     if isinstance(starting_sample, float)==True or isinstance(starting_sample, int)==True:
         raise ValueError("Starting sample should be an array not a float or int")
@@ -114,11 +118,13 @@ def dram(starting_sample: np.ndarray, cov: np.ndarray, num_samples: int, target_
         dim = starting_sample.shape[0]
 
     samples = np.zeros((num_samples, dim))
+    covar = np.zeros((num_samples, dim, dim))
     samples[0, :] = starting_sample
     
     current_logpdf, cost = target_logpdf(samples[0, :],cost)
     current_mean = starting_sample
     current_cov = cov
+    covar[0, :, :] = current_cov
     
     num_accept = 0
 
@@ -140,6 +146,7 @@ def dram(starting_sample: np.ndarray, cov: np.ndarray, num_samples: int, target_
         if a == 1 or u < a: # Accept
             samples[ii, :] = proposed_sample # Update the sample
             current_logpdf = proposed_logpdf # Update the logpdf
+            covar[ii, :, :] = current_cov   # Update the covariance
             num_accept += 1
         else:
             # Check if delayed is true
@@ -157,12 +164,15 @@ def dram(starting_sample: np.ndarray, cov: np.ndarray, num_samples: int, target_
                 if a_delay == 1 or u < a_delay: #accept
                     samples[ii, :] = proposed_sample2
                     current_logpdf = proposed2_logpdf
+                    covar[ii, :, :] = delayed_cov
                     num_accept += 1
                 else: # reject
                     samples[ii, :] = samples[ii-1, :]
+                    covar[ii, :, :] = current_cov 
             
             else: # if delayed is false reject
                 samples[ii, :] = samples[ii-1, :]
+                covar[ii, :, :] = current_cov 
         
         # Check if adaptive is true
         if adaptive:
@@ -182,17 +192,13 @@ def dram(starting_sample: np.ndarray, cov: np.ndarray, num_samples: int, target_
                                (k+1) * np.multiply(xbark.T, xbark) + np.multiply(xk.T, xk) + 
                                eps * np.eye(dim))
                 current_mean = new_mean
+                covar[ii, :, :] = current_cov
                 
-        if np.mod(ii,100) == 0:
-        #     print("-------------------------------------------------")
-        #     print("-------------------------------------------------")
+        if np.mod(ii,save_counter) == 0:
             print(f"-------------------In Iteration {ii}--------------")
-        #     np.savetxt(f'samples_{ii}.csv', samples, delimiter=",")
-        #     np.savetxt(f"covariance_{ii}.csv", current_cov, delimiter=",")
-        #     print("-------------------------------------------------")
-        #     print("-------------------------------------------------")
-        #     print("-------------------------------------------------")
-    return samples, num_accept / float(num_samples-1), cost
+            np.savetxt(f'{output_fname}/samples_{ii}.csv', samples, delimiter=",")
+            np.savetxt(f"{output_fname}/covariance_{ii}.csv", current_cov, delimiter=",")
+    return samples, covar, num_accept / float(num_samples-1), cost
 
 ## Additional Functions
 
