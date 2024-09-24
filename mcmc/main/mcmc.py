@@ -133,6 +133,9 @@ def dram(starting_sample: np.ndarray, cov: np.ndarray, num_samples: int, target_
     sd = (2.4**2/dim)
 
     for ii in range(1, num_samples):
+
+        if np.mod(ii,100) == 0:
+            print(f"-------------------In Iteration {ii}--------------")
         
         # propose
         proposed_sample = sampler(samples[ii-1, :], current_cov)
@@ -196,9 +199,107 @@ def dram(starting_sample: np.ndarray, cov: np.ndarray, num_samples: int, target_
                 
         if np.mod(ii,save_counter) == 0:
             print(f"-------------------In Iteration {ii}--------------")
-            np.savetxt(f'{output_fname}/samples_{ii}.csv', samples, delimiter=",")
+            np.savetxt(f'{output_fname}/samples_{ii}.csv', samples[ii, :], delimiter=",")
             np.savetxt(f"{output_fname}/covariance_{ii}.csv", current_cov, delimiter=",")
+            np.savetxt(f"{output_fname}/currentmean_{ii}.csv", current_mean, delimiter=",")
     return samples, covar, num_accept / float(num_samples-1), cost
+
+def am_gas(starting_sample: np.ndarray, starting_cov: np.ndarray, num_samples: int, target_logpdf: callable, proposal_logpdf: callable, sampler: callable, output_fname: str, am_C: float, am_alpha: float, am_ar: float, am_k0: int, cost: int = 0, save_counter: int = 100, print_counter: int = 1000) -> dict[np.ndarray, float, np.ndarray, int]:
+    """AM algorithm with Global Adaptive Scaling (Algorithm 4 in Andrieu, Christophe, and Johannes Thoms. “A Tutorial on Adaptive MCMC.” Statistics and Computing 18, no. 4 (December 2008): 343–73. https://doi.org/10.1007/s11222-008-9110-y.)
+    
+    Inputs
+    ------
+    starting_sample: (d, ) the initial sample
+    starting_cov: (d, d) starting proposal covariance
+    num_samples: positive integer, the number of total samples
+    target_logpdf: function(x) -> (float, int), logpdf of the target distribution and cost of the target logpdf
+    proposal_logpdf: function (x, y) -> float, logpdf of proposing y if current sample is x
+    proposal_sampler: function (x) -> y, generate a sample if you are currently at x
+    output_fname: str, name of the file to save the samples and covariance
+    kwargs: dict, additional arguments for the algorithm
+            kwargs['k0']: int, Number of steps to wait until adaptation kicks in
+            kwargs['C']: float, the scaling parameter for the stepsizes (gamma_i = C/i^alpha)
+            kwargs['alpha']: float, the scaling parameter for the stepsizes (gamma_i = C/i^alpha) alpha in ((1+\lambda)^-1, 1]
+            kwargs['target_acceptance']: float, the target acceptance rate
+    cost: int, sequential cost of the target logpdf
+    save_counter: int, save the samples and covariance every save_counter iterations (for restart)
+    
+    Returns
+    -------
+    output_dict: dict, dictionary containing the samples, covariance, acceptance ratio and cost
+        output_dict['Samples']: (num_samples, d) array of samples
+        output_dict['Covariance']: (num_samples, d, d) history of covariance matrix
+        output_dict['accept_ratio']: ratio of proposed samples that were accepted
+        output_dict['cost']: int, cost of the whole algorithm
+    """
+
+    if isinstance(starting_sample, float)==True or isinstance(starting_sample, int)==True:
+        raise ValueError("Starting sample should be an array not a float or int")
+    else:
+        # Get dimension of the problem
+        dim = starting_sample.shape[0]
+
+    samples = np.zeros((num_samples, dim))
+    covar = np.zeros((num_samples, dim, dim))
+    samples[0, :] = starting_sample
+    
+    current_logpdf, cost = target_logpdf(samples[0, :],cost)
+    current_mean = starting_sample
+    current_cov = starting_cov
+    covar[0, :, :] = current_cov
+    
+    num_accept = 0
+
+    # Adaptation parameters (hardcoded for now)
+    eps = 1e-7
+    lam = 1.0
+
+    for ii in range(1, num_samples):
+
+        if np.mod(ii,print_counter) == 0:
+            print(f"-------------------In Iteration {ii}--------------")
+
+        # Update gamma
+        gamma = am_C / (ii**am_alpha)
+
+        # propose
+        proposed_sample = sampler(samples[ii-1, :], lam*current_cov)
+        proposed_logpdf, cost = target_logpdf(proposed_sample, cost)
+
+        # determine acceptance probability
+        a = mh_acceptance_prob(current_logpdf, proposed_logpdf, samples[ii-1,:], proposed_sample, proposal_logpdf, current_cov)
+        
+        # Accept or reject the sample
+        u = np.random.rand()
+        if a == 1 or u < a: # Accept
+            samples[ii, :] = proposed_sample # Update the sample
+            current_logpdf = proposed_logpdf # Update the logpdf
+            covar[ii, :, :] = current_cov   # Update the covariance
+            num_accept += 1
+        else: # Reject
+            samples[ii, :] = samples[ii-1, :]
+            covar[ii, :, :] = current_cov 
+        
+        # Make the parameter udpates
+        current_mean = current_mean + gamma*(samples[ii, :] - current_mean)
+        if ii >= am_k0:
+            # ar = num_accept / ii
+            lam = lam*np.exp(gamma*(a-am_ar))
+            current_cov = current_cov + gamma*(np.outer(samples[ii, :] - current_mean, samples[ii, :] - current_mean) - current_cov + eps * np.eye(dim))
+
+        if np.mod(ii,save_counter) == 0:
+            print(f"-------------------In Iteration {ii}--------------")
+            np.savetxt(f'{output_fname}/samples_{ii}.csv', samples[ii, :], delimiter=",")
+            np.savetxt(f"{output_fname}/covariance_{ii}.csv", current_cov, delimiter=",")
+            np.savetxt(f"{output_fname}/currentmean_{ii}.csv", current_mean, delimiter=",")
+    
+    output_dict = {
+        'samples': samples,
+        'covariance': covar,
+        'ar': num_accept / float(ii),
+        'cost': cost
+    }
+    return output_dict
 
 ## Additional Functions
 

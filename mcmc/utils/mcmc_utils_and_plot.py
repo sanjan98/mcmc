@@ -18,6 +18,7 @@ from collections import namedtuple
 from matplotlib import rc
 from matplotlib.gridspec import GridSpec
 import matplotlib.colors as mcolors
+from matplotlib.ticker import FuncFormatter
 
 # For comments on the first four functions see the Gaussian Random Variable Notebook
 def lognormpdf(x, mean, cov):
@@ -127,6 +128,7 @@ def scatter_matrix(samples, #list of chains
 
     nchains = len(samples)
     dim = samples[0].shape[1]
+    
 
     if mins is None:
         mins = np.zeros((dim))
@@ -173,6 +175,13 @@ def scatter_matrix(samples, #list of chains
         end = dim + 1
         l = dim+1
 
+    means = [np.mean(np.concatenate([samples[kk][:, ii] for kk in range(nchains)])) for ii in range(dim)]
+
+    def one_decimal(x, pos):
+        return f'{x:.1f}'
+
+    formatter = FuncFormatter(one_decimal)
+
     # print("mins = ", mins)
     # print("maxs = ", maxs)
     for ii in range(dim):
@@ -186,7 +195,7 @@ def scatter_matrix(samples, #list of chains
         else:
             ax.tick_params(axis='x', bottom=True, top=False, labelbottom=True)
             if labels:
-                ax.set_xlabel(labels[ii])
+                ax.set_xlabel(labels[ii], fontsize='14')
             
         ax.tick_params(axis='y', left=False, right=False, labelleft=False)
         ax.set_frame_on(False)
@@ -210,8 +219,22 @@ def scatter_matrix(samples, #list of chains
                         ax.axvline(special['vals'][ii], color=special['color'], lw=2)
                     else:
                         ax.axvline(special['vals'][ii], lw=2)
-
+        
+        ax.axvline(means[ii], color='red', linestyle='--', lw=2, label=f'Mean: {means[ii]:.2f}')
         ax.set_xlim((use_mins[ii]-1e-10, use_maxs[ii]+1e-10))
+
+        # Setting two tick marks manually
+        diff = 0.2*(use_maxs[ii]-use_mins[ii])
+        xticks = np.linspace(use_mins[ii]+diff, use_maxs[ii]-diff, 2)
+        yticks = ax.get_yticks()
+        if len(yticks) >= 2:
+            yticks = np.linspace(yticks[0], yticks[-1], 2)
+        ax.set_xticks(xticks)
+        ax.set_yticks(yticks)
+
+        # Setting the formatter
+        ax.xaxis.set_major_formatter(formatter)
+        ax.yaxis.set_major_formatter(formatter)
 
         for jj in range(ii+1, dim):
             # print("jj = ", jj)
@@ -224,13 +247,13 @@ def scatter_matrix(samples, #list of chains
             else:
                 ax.tick_params(axis='x', bottom=True, top=False, labelbottom=True)
                 if labels:
-                    ax.set_xlabel(labels[ii])
+                    ax.set_xlabel(labels[ii], fontsize='14')
             if ii > 0:
                 ax.tick_params(axis='y', left=False, right=False, labelleft=False)
             else:
                 ax.tick_params(axis='y', left=True, right=False, labelleft=True)
                 if labels:
-                    ax.set_ylabel(labels[jj])
+                    ax.set_ylabel(labels[jj], fontsize='14')
                     
             ax.set_frame_on(True)     
 
@@ -255,12 +278,23 @@ def scatter_matrix(samples, #list of chains
                     else:
                         ax.plot(special['vals'][ii], special['vals'][jj], 'x',
                                 ms=2, mew=2)
-
+            
+            # ax.axhline(means[jj], color='red', linestyle='--', lw=2)
+            # ax.axvline(means[ii], color='red', linestyle='--', lw=2)
 
             ax.set_xlim((use_mins[ii], use_maxs[ii]))
             ax.set_ylim((use_mins[jj]-1e-10, use_maxs[jj]+1e-10))
 
+            # Setting two tick marks manually
+            diff = 0.2*(use_maxs[ii]-use_mins[ii])
+            xticks = np.linspace(use_mins[ii]+diff, use_maxs[ii]-diff, 2)
+            yticks = np.linspace(use_mins[jj]+diff, use_maxs[jj]-diff, 2)
+            ax.set_xticks(xticks)
+            ax.set_yticks(yticks)
 
+            # Setting the formatter
+            ax.xaxis.set_major_formatter(formatter)
+            ax.yaxis.set_major_formatter(formatter)
 
     plt.tight_layout(pad=0.01);
     if upper_right is not None:
@@ -294,9 +328,50 @@ def scatter_matrix(samples, #list of chains
         ax.tick_params(axis='x', bottom='both', top=False, labelbottom=True)
         ax.tick_params(axis='y', left='both', right=False, labelleft=False)
         ax.set_frame_on(True)
-        ax.set_xlabel(name)
+        ax.set_xlabel(name, fontsize='14')
+
+        # Setting two tick marks manually for the upper-right subplot
+        diff = 0.2*(ra[1]-ra[0])
+        xticks = np.linspace(ra[0]+diff, ra[1]-diff, 2)
+        yticks = ax.get_yticks()
+        if len(yticks) >= 2:
+            yticks = np.linspace(yticks[0], yticks[-1], 2)
+        ax.set_xticks(xticks)
+        ax.set_yticks(yticks)
+
+        # Setting the formatter
+        ax.xaxis.set_major_formatter(formatter)
+        ax.yaxis.set_major_formatter(formatter)
+
+
     plt.subplots_adjust(left=0.15, right=0.95)
     return fig, axs, gs
+
+def plot_trace(samples, labels=None, output_fname='.' ):
+    dim = samples.shape[1]
+    fig, axs = plt.subplots(dim, 1, figsize=(10,5))
+    for i in range(dim):
+        axs[i].plot(samples[:, i], '-k')
+        axs[i].set_ylabel(f'{labels[i]}', fontsize=14)
+        if i < dim-1:
+            axs[i].set_xticks([])    
+    axs[dim-1].set_xlabel('Sample Number', fontsize=14)
+    plt.savefig(f'{output_fname}.png', bbox_inches='tight')
+
+def plot_lag(samples, lbl, output_fname='.', maxlag=500, step=1):
+    lags, autolag = autocorrelation(samples, maxlag=maxlag,step=step)
+    ess = []
+    dim = samples.shape[1]
+    fig, axs = plt.subplots(dim, 1, figsize=(10,5))
+    for i in range(dim):
+        ess.append(effective_sample_size(autolag[:,i]))
+        axs[i].plot(lags, autolag[:, i],'-.', label='ESS = %.2f' % ess[i])
+        axs[i].set_ylabel(f'{lbl[i]}', fontsize=14)
+        axs[i].legend(fontsize=11)
+        if i < dim-1:
+            axs[i].set_xticks([])
+    axs[dim-1].set_xlabel('Lag', fontsize=14)
+    plt.savefig(f'{output_fname}.png', bbox_inches='tight')
 
 ### Auto Correlation
 
@@ -316,7 +391,11 @@ def autocorrelation(samples, maxlag=100, step=1):
     """
     
     # Get the shapes
-    ndim = samples.shape[1]
+    try:
+        ndim = samples.shape[1]
+    except IndexError:
+        ndim = 1
+        samples = samples[:, np.newaxis]
     nsamples = samples.shape[0]    
     
     # Compute the mean
@@ -340,21 +419,19 @@ def autocorrelation(samples, maxlag=100, step=1):
 
 ### Effective Sample Size
 
-def effective_sample_size(Nsamples, auto_corr):
-    """Compute the effective MCMC sample size
+def effective_sample_size(auto_corrs):
+    """Estimate the effective sample size for an array of samples."""
+    n = len(auto_corrs)
 
-    Inputs
-    ------
-    Nsamples: Number if MCMC samples
-    auto_corr: (maxlag, ndim) Autocorrelation
-    
-    Returns
-    -------
-    ESS: Effective Sample size
-    """
-    IAC = 1 + 2*np.sum(auto_corr, axis=0)
-    ESS = Nsamples / IAC
-    return ESS
+    # Sum the sequence of autocorrelations
+    negative_autocorr = auto_corrs[auto_corrs < 0]
+    if len(negative_autocorr) > 0:  # truncate the sum at first negative autocorrelation
+        first_negative = np.where(auto_corrs < 0)[0][0]
+    else:
+        first_negative = len(auto_corrs)
+
+    ess = n / (1 + 2 * np.sum(auto_corrs[:first_negative]))
+    return ess
 
 def batch_normal_pdf(x, mu, cov, logpdf=True):
     """
@@ -494,16 +571,16 @@ def laplace_approx(x0, logpost, optmethod):
     :returns cov_approx: (nparam, nparam), covariance matrix for Gaussian fit at MAP
     """
     # Gradient free method to obtain optimum
-    neg_post = lambda x: -logpost(x,0)[0]
+    neg_post = lambda x: -logpost(x)
     # neg_post = lambda x: -logpost(x)
-    res = scipy.optimize.minimize(neg_post, x0)#, method=optmethod)#, tol=1e-6, options={'maxiter': 100, 'disp': True})
+    res = scipy.optimize.minimize(neg_post, x0, method=optmethod)#, tol=1e-6, options={'maxiter': 100, 'disp': True})
     print('----------------------------------------------------------------------------')
     print('----------------------------------------------------------------------------')
     print('--------------------First optimization done---------------------------------')
     print('----------------------------------------------------------------------------')
     print('----------------------------------------------------------------------------')
     # Gradient method which also approximates the inverse of the hessian
-    res = scipy.optimize.minimize(neg_post, res.x*0.95, method=optmethod)#, tol=1e-4, options={'maxiter': 20, 'disp': True})
+    # res = scipy.optimize.minimize(neg_post, res.x*0.95, method=optmethod)#, tol=1e-4, options={'maxiter': 20, 'disp': True})
     map_point = res.x
     cov_approx = res.hess_inv
     return map_point, cov_approx
@@ -560,3 +637,34 @@ def invgamma_univariate(x, alpha, beta):
 
     logpdf = alpha*np.log(beta) - scipy.special.gammaln(alpha) - (alpha+1)*np.log(x) - beta/x
     return logpdf
+
+def nearest_positive_definite(A):
+    """Find the nearest positive definite matrix to A."""
+    B = (A + A.T) / 2
+    _, s, V = np.linalg.svd(B)
+
+    H = np.dot(V.T * s, V)
+
+    A2 = (B + H) / 2
+    A3 = (A2 + A2.T) / 2
+
+    if is_positive_definite(A3):
+        return A3
+
+    spacing = np.spacing(np.linalg.norm(A))
+    I = np.eye(A.shape[0])
+    k = 1
+    while not is_positive_definite(A3):
+        mineig = np.min(np.real(np.linalg.eigvals(A3)))
+        A3 += I * (-mineig * k**2 + spacing)
+        k += 1
+
+    return A3
+
+def is_positive_definite(A):
+    """Check if a matrix A is positive definite by attempting Cholesky decomposition."""
+    try:
+        np.linalg.cholesky(A)
+        return True
+    except np.linalg.LinAlgError:
+        return False
