@@ -358,14 +358,14 @@ def plot_trace(samples, labels=None, output_fname='.' ):
     axs[dim-1].set_xlabel('Sample Number', fontsize=14)
     plt.savefig(f'{output_fname}.png', bbox_inches='tight')
 
-def plot_lag(samples, lbl, output_fname='.', maxlag=500, step=1):
+def plot_lag(samples, lbl=None, output_fname='.', maxlag=500, step=1):
     lags, autolag = autocorrelation(samples, maxlag=maxlag,step=step)
     ess = []
     dim = samples.shape[1]
     fig, axs = plt.subplots(dim, 1, figsize=(10,5))
     for i in range(dim):
         ess.append(effective_sample_size(autolag[:,i]))
-        axs[i].plot(lags, autolag[:, i],'-.', label='ESS = %.2f' % ess[i])
+        axs[i].plot(lags, autolag[:, i],'-o', label='ESS = %.2f' % ess[i], alpha=0.3)
         axs[i].set_ylabel(f'{lbl[i]}', fontsize=14)
         axs[i].legend(fontsize=11)
         if i < dim-1:

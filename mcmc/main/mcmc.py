@@ -3,6 +3,7 @@ mcmc - Python code performing Markov Charin Monte Carlo and it's variants (delay
 
 """
 # Imports
+import os
 import numpy as np
 from numpy.linalg.linalg import LinAlgError
 from typing import Tuple
@@ -239,20 +240,26 @@ def am_gas(starting_sample: np.ndarray, starting_cov: np.ndarray, num_samples: i
         # Get dimension of the problem
         dim = starting_sample.shape[0]
 
+    if not os.path.exists(output_fname):
+        os.makedirs(output_fname)
+
     samples = np.zeros((num_samples, dim))
-    covar = np.zeros((num_samples, dim, dim))
+    covariance = np.zeros((num_samples, dim, dim))
+    current_mean = np.zeros((num_samples, dim))
+    lam = np.zeros(num_samples)
+
     samples[0, :] = starting_sample
-    
     current_logpdf, cost = target_logpdf(samples[0, :],cost)
-    current_mean = starting_sample
-    current_cov = starting_cov
-    covar[0, :, :] = current_cov
+
+    covariance[0, :, :] = starting_cov
+    current_mean[0, :] = starting_sample
+    lam[0] = 2.4**2/dim
     
     num_accept = 0
 
     # Adaptation parameters (hardcoded for now)
     eps = 1e-7
-    lam = 1.0
+    
 
     for ii in range(1, num_samples):
 
@@ -263,42 +270,47 @@ def am_gas(starting_sample: np.ndarray, starting_cov: np.ndarray, num_samples: i
         gamma = am_C / (ii**am_alpha)
 
         # propose
-        proposed_sample = sampler(samples[ii-1, :], lam*current_cov)
+        proposed_sample = sampler(samples[ii-1, :], lam[ii-1]*covariance[ii-1, :, :])
         proposed_logpdf, cost = target_logpdf(proposed_sample, cost)
 
         # determine acceptance probability
-        a = mh_acceptance_prob(current_logpdf, proposed_logpdf, samples[ii-1,:], proposed_sample, proposal_logpdf, current_cov)
+        a = mh_acceptance_prob(current_logpdf, proposed_logpdf, samples[ii-1,:], proposed_sample, proposal_logpdf, covariance[ii-1, :, :])
         
         # Accept or reject the sample
         u = np.random.rand()
         if a == 1 or u < a: # Accept
             samples[ii, :] = proposed_sample # Update the sample
             current_logpdf = proposed_logpdf # Update the logpdf
-            covar[ii, :, :] = current_cov   # Update the covariance
             num_accept += 1
         else: # Reject
             samples[ii, :] = samples[ii-1, :]
-            covar[ii, :, :] = current_cov 
-        
+
         # Make the parameter udpates
-        current_mean = current_mean + gamma*(samples[ii, :] - current_mean)
+        current_mean[ii, :] = current_mean[ii-1, :] + gamma*(samples[ii, :] - current_mean[ii-1, :])
         if ii >= am_k0:
             # ar = num_accept / ii
-            lam = lam*np.exp(gamma*(a-am_ar))
-            current_cov = current_cov + gamma*(np.outer(samples[ii, :] - current_mean, samples[ii, :] - current_mean) - current_cov + eps * np.eye(dim))
+            lam[ii] = lam[ii-1]*np.exp(gamma*(a-am_ar))
+            covariance[ii, :, :] = covariance[ii-1, :, :] + gamma*(np.outer(samples[ii, :] - current_mean[ii, :], samples[ii, :] - current_mean[ii, :]) - covariance[ii-1, :, :] + eps * np.eye(dim))
+        else:
+            covariance[ii, :, :] = covariance[ii-1, :, :]
+            lam[ii] = lam[ii-1]
 
         if np.mod(ii,save_counter) == 0:
             print(f"-------------------In Iteration {ii}--------------")
             np.savetxt(f'{output_fname}/samples_{ii}.csv', samples[ii, :], delimiter=",")
-            np.savetxt(f"{output_fname}/covariance_{ii}.csv", current_cov, delimiter=",")
             np.savetxt(f"{output_fname}/currentmean_{ii}.csv", current_mean, delimiter=",")
+            np.savetxt(f"{output_fname}/covariance_{ii}.csv", covariance, delimiter=",")
+            np.savetxt(f"{output_fname}/lambda_{ii}.csv", lam, delimiter=",")
     
     output_dict = {
         'samples': samples,
-        'covariance': covar,
+        'mean': current_mean,
+        'covariance': covariance,
+        'lambda': lam,
         'ar': num_accept / float(ii),
-        'cost': cost
+        'cost': cost,
     }
+
     return output_dict
 
 ## Additional Functions
