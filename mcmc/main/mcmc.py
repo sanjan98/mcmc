@@ -205,7 +205,7 @@ def dram(starting_sample: np.ndarray, cov: np.ndarray, num_samples: int, target_
             np.savetxt(f"{output_fname}/currentmean_{ii}.csv", current_mean, delimiter=",")
     return samples, covar, num_accept / float(num_samples-1), cost
 
-def am_gas(starting_sample: np.ndarray, starting_cov: np.ndarray, num_samples: int, target_logpdf: callable, proposal_logpdf: callable, sampler: callable, output_fname: str, am_C: float, am_alpha: float, am_ar: float, am_k0: int, cost: int = 0, save_counter: int = 100, print_counter: int = 1000) -> dict[np.ndarray, float, np.ndarray, int]:
+def am_gas(starting_sample: np.ndarray, starting_cov: np.ndarray, num_samples: int, target_logpdf: callable, proposal_logpdf: callable, sampler: callable, output_fname: str, am_C: float, am_alpha: float, am_ar: float, am_k0: int, am_stop: int, cost: int = 0, save_counter: int = 100, print_counter: int = 1000) -> dict[np.ndarray, float, np.ndarray, int]:
     """AM algorithm with Global Adaptive Scaling (Algorithm 4 in Andrieu, Christophe, and Johannes Thoms. “A Tutorial on Adaptive MCMC.” Statistics and Computing 18, no. 4 (December 2008): 343–73. https://doi.org/10.1007/s11222-008-9110-y.)
     
     Inputs
@@ -259,18 +259,28 @@ def am_gas(starting_sample: np.ndarray, starting_cov: np.ndarray, num_samples: i
 
     # Adaptation parameters (hardcoded for now)
     eps = 1e-7
-    
+    stop = am_stop
 
     for ii in range(1, num_samples):
 
         if np.mod(ii,print_counter) == 0:
             print(f"-------------------In Iteration {ii}--------------")
 
+        if ii == stop:
+            print('Adaptive phase completed')
+            start_idx = ii - int(0.2*num_samples)
+            end_idx = ii-1
+            lam[ii-1] = np.mean(lam[start_idx:end_idx])
+            covariance[ii-1, :, :] = np.mean(covariance[start_idx:end_idx], axis=0)
+
         # Update gamma
         gamma = am_C / (ii**am_alpha)
+        # gamma = 1.0/ii
 
         # propose
-        proposed_sample = sampler(samples[ii-1, :], lam[ii-1]*covariance[ii-1, :, :])
+        # proposed_sample = sampler(samples[ii-1, :], lam[ii-1]*covariance[ii-1, :, :])
+        eta = sampler(np.zeros(dim), covariance[ii-1, :, :])
+        proposed_sample = samples[ii-1, :] + np.dot((lam[ii-1]), eta)
         proposed_logpdf, cost = target_logpdf(proposed_sample, cost)
 
         # determine acceptance probability
@@ -287,7 +297,7 @@ def am_gas(starting_sample: np.ndarray, starting_cov: np.ndarray, num_samples: i
 
         # Make the parameter udpates
         current_mean[ii, :] = current_mean[ii-1, :] + gamma*(samples[ii, :] - current_mean[ii-1, :])
-        if ii >= am_k0:
+        if ii >= am_k0 and ii < stop:
             # ar = num_accept / ii
             lam[ii] = lam[ii-1]*np.exp(gamma*(a-am_ar))
             covariance[ii, :, :] = covariance[ii-1, :, :] + gamma*(np.outer(samples[ii, :] - current_mean[ii, :], samples[ii, :] - current_mean[ii, :]) - covariance[ii-1, :, :] + eps * np.eye(dim))
