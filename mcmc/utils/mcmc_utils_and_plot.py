@@ -535,7 +535,11 @@ def normal_sample(mean, cov, nsamples=1):
     dim = len(mean)
     standard_normal_samples = np.random.randn(dim, nsamples)
     # Apply Cholesky factorization on the covariance matrix
-    cholesky_factor = np.linalg.cholesky(cov)
+    try:
+        cholesky_factor = np.linalg.cholesky(cov)
+    except np.linalg.LinAlgError:
+        cov = nearest_positive_definite(cov)
+        cholesky_factor = np.linalg.cholesky(cov)
     # Generate the samples
     samples = mean[:,np.newaxis] + cholesky_factor @ standard_normal_samples
     samples = np.squeeze(samples)
@@ -668,3 +672,17 @@ def is_positive_definite(A):
         return True
     except np.linalg.LinAlgError:
         return False
+    
+def batched_variance(data, batch_size):
+    """Calculates the variance of a dataset using a batched approach."""
+
+    n_batches = int(np.ceil(len(data) / batch_size))
+    batch_variances = []
+
+    for i in range(n_batches):
+        start = i * batch_size
+        end = min((i + 1) * batch_size, len(data))
+        batch = data[start:end]
+        batch_variances.append(np.var(batch, ddof=1))  # Sample variance
+
+    return np.mean(batch_variances)
