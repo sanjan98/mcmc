@@ -577,7 +577,7 @@ def laplace_approx(x0, logpost, optmethod):
     # Gradient free method to obtain optimum
     neg_post = lambda x: -logpost(x)
     # neg_post = lambda x: -logpost(x)
-    res = scipy.optimize.minimize(neg_post, x0, method=optmethod)#, tol=1e-6, options={'maxiter': 100, 'disp': True})
+    res = scipy.optimize.minimize(neg_post, x0, method=optmethod, tol=1e-6, options={'maxiter': 100, 'disp': True})
     print('----------------------------------------------------------------------------')
     print('----------------------------------------------------------------------------')
     print('--------------------First optimization done---------------------------------')

@@ -205,7 +205,7 @@ def dram(starting_sample: np.ndarray, cov: np.ndarray, num_samples: int, target_
             np.savetxt(f"{output_fname}/currentmean_{ii}.csv", current_mean, delimiter=",")
     return samples, covar, num_accept / float(num_samples-1), cost
 
-def am_gas(starting_sample: np.ndarray, starting_cov: np.ndarray, num_samples: int, target_logpdf: callable, proposal_logpdf: callable, sampler: callable, output_fname: str, am_C: float, am_alpha: float, am_ar: float, am_k0: int, am_stop: int, cost: int = 0, save_counter: int = 100, print_counter: int = 1000) -> dict[np.ndarray, float, np.ndarray, int]:
+def am_gas(starting_sample: np.ndarray, starting_cov: np.ndarray, num_samples: int, target_logpdf: callable, proposal_logpdf: callable, sampler: callable, output_fname: str, am_C: float, am_alpha: float, am_ar: float, am_k0: int, am_stop: int, lamb: float, cost: int = 0, save_counter: int = 100, print_counter: int = 1000) -> dict[np.ndarray, float, np.ndarray, int]:
     """AM algorithm with Global Adaptive Scaling (Algorithm 4 in Andrieu, Christophe, and Johannes Thoms. “A Tutorial on Adaptive MCMC.” Statistics and Computing 18, no. 4 (December 2008): 343–73. https://doi.org/10.1007/s11222-008-9110-y.)
     
     Inputs
@@ -253,7 +253,7 @@ def am_gas(starting_sample: np.ndarray, starting_cov: np.ndarray, num_samples: i
 
     covariance[0, :, :] = starting_cov
     current_mean[0, :] = starting_sample
-    lam[0] = 2.4**2/dim
+    lam[0] = lamb#2.4**2/dim
     
     num_accept = 0
 
@@ -307,17 +307,17 @@ def am_gas(starting_sample: np.ndarray, starting_cov: np.ndarray, num_samples: i
 
         if np.mod(ii,save_counter) == 0:
             print(f"-------------------In Iteration {ii}--------------")
-            np.savetxt(f'{output_fname}/samples_{ii}.csv', samples[ii, :], delimiter=",")
-            np.savetxt(f"{output_fname}/currentmean_{ii}.csv", current_mean, delimiter=",")
-            np.savetxt(f"{output_fname}/covariance_{ii}.csv", covariance, delimiter=",")
-            np.savetxt(f"{output_fname}/lambda_{ii}.csv", lam, delimiter=",")
-    
+            np.save(f'{output_fname}/samples_{ii}.npy', samples)
+            np.save(f"{output_fname}/currentmean_{ii}.npy", current_mean)
+            np.save(f"{output_fname}/covariance_{ii}.npy", covariance)
+            np.save(f"{output_fname}/lambda_{ii}.npy", lam)
+
     output_dict = {
         'samples': samples,
         'mean': current_mean,
         'covariance': covariance,
         'lambda': lam,
-        'ar': num_accept / float(ii),
+        'ar': num_accept / float(num_samples-1),
         'cost': cost,
     }
 
