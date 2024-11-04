@@ -205,7 +205,7 @@ def dram(starting_sample: np.ndarray, cov: np.ndarray, num_samples: int, target_
             np.savetxt(f"{output_fname}/currentmean_{ii}.csv", current_mean, delimiter=",")
     return samples, covar, num_accept / float(num_samples-1), cost
 
-def am_gas(starting_sample: np.ndarray, starting_cov: np.ndarray, num_samples: int, target_logpdf: callable, proposal_logpdf: callable, sampler: callable, output_fname: str, am_C: float, am_alpha: float, am_ar: float, am_k0: int, am_stop: int, lamb: float, cost: int = 0, save_counter: int = 100, print_counter: int = 1000) -> dict[np.ndarray, float, np.ndarray, int]:
+def am_gas(starting_sample: np.ndarray, starting_cov: np.ndarray, num_samples: int, target_logpdf: callable, proposal_logpdf: callable, sampler: callable, output_fname: str, am_C: float, am_alpha: float, am_ar: float, am_k0: int, am_stop: int, am_lamb: float, cost: int = 0, save_counter: int = 100, print_counter: int = 1000) -> dict[np.ndarray, float, np.ndarray, int]:
     """AM algorithm with Global Adaptive Scaling (Algorithm 4 in Andrieu, Christophe, and Johannes Thoms. “A Tutorial on Adaptive MCMC.” Statistics and Computing 18, no. 4 (December 2008): 343–73. https://doi.org/10.1007/s11222-008-9110-y.)
     
     Inputs
@@ -253,7 +253,7 @@ def am_gas(starting_sample: np.ndarray, starting_cov: np.ndarray, num_samples: i
 
     covariance[0, :, :] = starting_cov
     current_mean[0, :] = starting_sample
-    lam[0] = lamb#2.4**2/dim
+    lam[0] = am_lamb#2.4**2/dim
     
     num_accept = 0
 
