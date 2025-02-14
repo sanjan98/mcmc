@@ -323,6 +323,197 @@ def am_gas(starting_sample: np.ndarray, starting_cov: np.ndarray, num_samples: i
 
     return output_dict
 
+def twostage_acceptance_prob(current_logpdf_high, proposed_logpdf_high, current_logpdf_low, proposed_logpdf_low):
+    """Compute the two stage accept-reject probability
+    
+    Inputs
+    ------
+    current_logpdf_high : float, logpdf at the current sample in the fine chain
+    proposed_logpdf_high : float, logpdf at the proposed sample in the fine chain
+    current_logpdf_low : float, logpdf at the current sample in the coarse chain
+    proposed_logpdf_low : float, logpdf at the proposed sample in the coarse chain
+    
+    Returns
+    -------
+    acceptance probability
+    """
+
+    check = proposed_logpdf_high - current_logpdf_high + current_logpdf_low - proposed_logpdf_low
+    if check < 0:
+        return np.exp(check)
+    else:
+        return 1
+
+def da_mcmc(mcmc_params: dict, target_logpdf_list: list, mcmc_iters: int, proposal: dict, adaptive_params: dict) -> dict[np.ndarray, float, np.ndarray, int]:
+    """
+    Delayed Acceptance MCMC Algorithm
+
+    Inputs
+    ------
+    mcmc_params: dict, dictionary containing the parameters for the MCMC
+        mcmc_params['dim']: int, dimension of the parameter space
+        mcmc_params['starting_point']: np.array, starting point for the MCMC chain
+        mcmc_params['output_dir']: str, output directory for saving the samples
+        mcmc_params['cost']: int, starting cost for the MCMC
+        mcmc_params['save_counter']: int, counter for saving the samples
+        mcmc_params['print_counter']: int, counter for printing the samples
+
+    target_logpdf_list: list, list of target logpdf functions for the MCMC
+
+    mcmc_iters: int, number of MCMC iterations (Outer loop)
+
+    proposal: dict, dictionary housing the proposal distribution for MCMC
+        proposal['logpdf']: callable, logpdf function for the proposal distribution
+        proposal['sampler']: callable, sampler function for the proposal distribution
+        proposal['cov']: np.array, covariance matrix for the proposal distribution
+
+    adaptive_params: dict, dictionary housing the adaptive parameters for MCMC
+        adaptive_params['am_C']: float, value of the adaptive parameter C
+        adaptive_params['am_alpha']: float, value of the adaptive parameter alpha
+        adaptive_params['am_ar']: float, target acceptance ratio for the adaptive MCMC
+        adaptive_params['am_k0']: float, starting iteration for adaptation
+        adaptive_params['am_stop']: int, ending iteration for adaptation
+        adaptive_params['am_lamb']: float, initial scaling parameter for the proposal distribution
+
+    Returns
+    -------
+    output_dict: dict, dictionary containing the samples, covariance, acceptance ratio and cost
+        output_dict['Samples']: (num_samples, d) array of samples
+        output_dict['Covariance']: (num_samples, d, d) history of covariance matrix
+        output_dict['accept_ratio']: ratio of proposed samples that were accepted
+        output_dict['cost']: int, cost of the whole algorithm
+    """
+
+    # Unpack and initialize the MCMC parameters
+    dim = mcmc_params['dim']
+    starting_point = mcmc_params['starting_point']
+    cost = mcmc_params['cost']
+    save_counter = mcmc_params['save_counter']
+    print_counter = mcmc_params['print_counter']
+    output_dir = mcmc_params['output_dir']
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+
+    # Unpack the proposal distribution
+    proposal_logpdf = proposal['logpdf']
+    proposal_sampler = proposal['sampler']
+    proposal_cov = proposal['cov'] 
+
+    # Unpack the adaptive parameters
+    am_C = adaptive_params['am_C']
+    am_alpha = adaptive_params['am_alpha']
+    am_ar = adaptive_params['am_ar']
+    am_k0 = adaptive_params['am_k0']
+    am_stop = adaptive_params['am_stop']
+    am_lamb = adaptive_params['am_lamb']
+
+    # Some basic checks
+    if isinstance(starting_point, float)==True or isinstance(starting_point, int)==True:
+        raise ValueError("Starting sample should be an array not a float or int")
+    else:
+        # Get dimension of the problem
+        assert starting_point.shape[0] == dim, "Starting point and dimension do not match"
+
+    assert len(target_logpdf_list) == 2, "Only two (high and low) target logpdfs are supported for now"
+
+    target_logpdf_low = target_logpdf_list[0]
+    target_logpdf_high = target_logpdf_list[1]
+
+    samples = np.zeros((mcmc_iters, dim))
+    covariance = np.zeros((mcmc_iters, dim, dim))
+    current_mean = np.zeros((mcmc_iters, dim))
+    lam = np.zeros(mcmc_iters)
+
+    samples[0, :] = starting_point
+    current_logpdf_low, cost = target_logpdf_low(samples[0, :], cost)
+    current_logpdf_high, cost = target_logpdf_high(samples[0, :], cost)
+
+    covariance[0, :, :] = proposal_cov
+    current_mean[0, :] = starting_point
+    lam[0] = am_lamb
+    
+    accept_low = np.zeros(mcmc_iters)
+    accept_high = np.zeros(mcmc_iters)
+
+    # Adaptation parameters (hardcoded for now)
+    eps = 1e-7
+    stop = am_stop
+
+    a2 = 0.0
+
+    for ii in range(1, mcmc_iters):
+
+        if np.mod(ii,print_counter) == 0:
+            print(f"-------------------In Iteration {ii}--------------")
+
+        if ii == stop:
+            print('Adaptive phase completed')
+            start_idx = ii - int(0.2*mcmc_iters)
+            end_idx = ii-1
+            lam[ii-1] = np.mean(lam[start_idx:end_idx])
+            covariance[ii-1, :, :] = np.mean(covariance[start_idx:end_idx], axis=0)
+
+        # Update gamma
+        gamma = am_C / (ii**am_alpha)
+
+        # propose
+        eta = proposal_sampler(np.zeros(dim), covariance[ii-1, :, :])
+        proposed_sample = samples[ii-1, :] + np.dot((lam[ii-1]), eta)
+        proposed_logpdf_low, cost = target_logpdf_low(proposed_sample, cost)
+
+        # determine acceptance probability
+        a1 = mh_acceptance_prob(current_logpdf_low, proposed_logpdf_low, samples[ii-1,:], proposed_sample, proposal_logpdf, covariance[ii-1, :, :])
+        
+        # Accept or reject the sample based on the low fidelity model
+        u = np.random.rand()
+        if a1 == 1 or u < a1: # Accept
+            accept_low[ii] = 1
+
+            proposed_logpdf_high, cost = target_logpdf_high(proposed_sample, cost)
+            a2 = twostage_acceptance_prob(current_logpdf_high, proposed_logpdf_high, current_logpdf_low, proposed_logpdf_low)
+            v = np.random.rand()
+
+            if a2 == 1 or v < a2: 
+                accept_high[ii] = 1
+                samples[ii, :] = proposed_sample
+                current_logpdf_low = proposed_logpdf_low
+                current_logpdf_high = proposed_logpdf_high
+        
+            else: 
+                samples[ii, :] = samples[ii-1, :]
+        else:
+            samples[ii, :] = samples[ii-1, :]
+
+        # Make the parameter udpates
+        current_mean[ii, :] = current_mean[ii-1, :] + gamma*(samples[ii, :] - current_mean[ii-1, :])
+        if ii >= am_k0 and ii < stop:
+            # ar = num_accept / ii
+            lam[ii] = lam[ii-1]*np.exp(gamma*(a2-am_ar))
+            covariance[ii, :, :] = covariance[ii-1, :, :] + gamma*(np.outer(samples[ii, :] - current_mean[ii, :], samples[ii, :] - current_mean[ii, :]) - covariance[ii-1, :, :] + eps * np.eye(dim))
+        else:
+            covariance[ii, :, :] = covariance[ii-1, :, :]
+            lam[ii] = lam[ii-1]
+
+        if np.mod(ii,save_counter) == 0:
+            print(f"-------------------In Iteration {ii}--------------")
+            np.save(f'{output_dir}/samples_{ii}.npy', samples)
+            np.save(f"{output_dir}/currentmean_{ii}.npy", current_mean)
+            np.save(f"{output_dir}/covariance_{ii}.npy", covariance)
+            np.save(f"{output_dir}/lambda_{ii}.npy", lam)
+
+    output_dict = {
+        'samples': samples,
+        'mean': current_mean,
+        'covariance': covariance,
+        'lambda': lam,
+        'ar': np.sum(accept_high) / float(mcmc_iters-1),
+        'accept_low': accept_low,
+        'accept_high': accept_high,
+        'cost': cost,
+    }
+
+    return output_dict
+
 ## Additional Functions
 
 def is_positive_definite(B):

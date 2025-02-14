@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 import matplotlib
 import scipy
 from scipy import stats
+import seaborn as sns
 
 import matplotlib as mpl
 from matplotlib import cm
@@ -117,30 +118,35 @@ def sub_sample_data(samples, frac_burn=0.2, frac_use=0.7):
     inds = inds[inds2]
     return samples[inds, :]
 
-def scatter_matrix(samples, #list of chains
+def scatter_matrix(samples,  # list of chains
                    mins=None, maxs=None,
                    upper_right=None,
                    specials=None,
-                   hist_plot=True, # if false then only data
+                   hist_plot=True,  # if false then only data
                    nbins=200,
                    gamma=0.5,
                    labels=None):
 
+    # Set the style using Seaborn and configure LaTeX font
+    sns.set_style("whitegrid")
+    sns.set_context("talk")
+    plt.rc('text', usetex=True)
+    plt.rc('font', family='serif')
+
     nchains = len(samples)
     dim = samples[0].shape[1]
-    
+
+    # Get the default Seaborn color palette
+    colors = sns.color_palette("tab10")
 
     if mins is None:
         mins = np.zeros((dim))
         maxs = np.zeros((dim))
 
         for ii in range(dim):
-            # print("ii = ", ii)
             mm = [np.quantile(samp[:, ii], 0.01, axis=0) for samp in samples]
-            # print("\t mins = ", mm)
             mins[ii] = np.min(mm)
-            mm = [np.quantile(samp[:, ii], 0.99, axis=0) for samp in samples]            
-            # print("\t maxs = ", mm)
+            mm = [np.quantile(samp[:, ii], 0.99, axis=0) for samp in samples]
             maxs[ii] = np.max(mm)
 
             if specials is not None:
@@ -148,32 +154,28 @@ def scatter_matrix(samples, #list of chains
                     minspec = np.min([spec['vals'][ii] for spec in specials])
                     maxspec = np.max([spec['vals'][ii] for spec in specials])
                 else:
-                    minspec = spec['vals'][ii]
-                    maxspec = spec['vals'][ii]
+                    minspec = specials['vals'][ii]
+                    maxspec = specials['vals'][ii]
                 mins[ii] = min(mins[ii], minspec)
                 maxs[ii] = max(maxs[ii], maxspec)
     
-
     deltas = (maxs - mins) / 10.0
     use_mins = mins - deltas
     use_maxs = maxs + deltas
 
-    cmuse = cm.get_cmap(name='tab10')
-
-    # fig = plt.figure(constrained_layout=True)
-    fig = plt.figure(figsize=(18,10))
+    fig = plt.figure(figsize=(18, 10))
     if upper_right is None:
         gs = GridSpec(dim, dim, figure=fig)
-        axs = [None]*dim*dim
+        axs = [None] * dim * dim
         start = 0
         end = dim
         l = dim
     else:
-        gs = GridSpec(dim+1, dim+1, figure=fig)
-        axs = [None]*(dim+1)*(dim+1)
+        gs = GridSpec(dim + 1, dim + 1, figure=fig)
+        axs = [None] * (dim + 1) * (dim + 1)
         start = 1
         end = dim + 1
-        l = dim+1
+        l = dim + 1
 
     means = [np.mean(np.concatenate([samples[kk][:, ii] for kk in range(nchains)])) for ii in range(dim)]
 
@@ -182,67 +184,54 @@ def scatter_matrix(samples, #list of chains
 
     formatter = FuncFormatter(one_decimal)
 
-    # print("mins = ", mins)
-    # print("maxs = ", maxs)
     for ii in range(dim):
-        # print("ii = ", ii)
-        axs[ii] = fig.add_subplot(gs[ii+start, ii])
+        axs[ii] = fig.add_subplot(gs[ii + start, ii])
         ax = axs[ii]
 
-        # Turn everythinng off
-        if ii < dim-1:
+        if ii < dim - 1:
             ax.tick_params(axis='x', bottom=False, top=False, labelbottom=False)
         else:
             ax.tick_params(axis='x', bottom=True, top=False, labelbottom=True)
             if labels:
                 ax.set_xlabel(labels[ii], fontsize='14')
-            
+
         ax.tick_params(axis='y', left=False, right=False, labelleft=False)
         ax.set_frame_on(False)
 
         sampii = np.concatenate([samples[kk][:, ii] for kk in range(nchains)])
-        # for kk in range(nchains):
-        # print("sampii == ", sampii)
-        ax.hist(sampii,            
-                # ax.hist(samples[kk][:, ii],
+        ax.hist(sampii,
                 bins='sturges',
                 density=True,
                 edgecolor='black',
-                stacked=True,
-                range=(use_mins[ii],use_maxs[ii]),
+                range=(use_mins[ii], use_maxs[ii]),
                 alpha=0.4)
         if specials is not None:
             for special in specials:
                 if special['vals'][ii] is not None:
-                    # ax.axvline(special[ii], color='red', lw=2)
                     if 'color' in special:
                         ax.axvline(special['vals'][ii], color=special['color'], lw=2)
                     else:
                         ax.axvline(special['vals'][ii], lw=2)
-        
-        ax.axvline(means[ii], color='red', linestyle='--', lw=2, label=f'Mean: {means[ii]:.2f}')
-        ax.set_xlim((use_mins[ii]-1e-10, use_maxs[ii]+1e-10))
 
-        # Setting two tick marks manually
-        diff = 0.2*(use_maxs[ii]-use_mins[ii])
-        xticks = np.linspace(use_mins[ii]+diff, use_maxs[ii]-diff, 2)
+        ax.axvline(means[ii], color='red', linestyle='--', lw=2, label=f'Mean: {means[ii]:.2f}')
+        ax.set_xlim((use_mins[ii] - 1e-10, use_maxs[ii] + 1e-10))
+
+        diff = 0.2 * (use_maxs[ii] - use_mins[ii])
+        xticks = np.linspace(use_mins[ii] + diff, use_maxs[ii] - diff, 2)
         yticks = ax.get_yticks()
         if len(yticks) >= 2:
             yticks = np.linspace(yticks[0], yticks[-1], 2)
         ax.set_xticks(xticks)
         ax.set_yticks(yticks)
 
-        # Setting the formatter
         ax.xaxis.set_major_formatter(formatter)
         ax.yaxis.set_major_formatter(formatter)
 
-        for jj in range(ii+1, dim):
-            # print("jj = ", jj)
-            axs[jj*l + ii] = fig.add_subplot(gs[jj+start, ii])
-            ax = axs[jj*l + ii]
+        for jj in range(ii + 1, dim):
+            axs[jj * l + ii] = fig.add_subplot(gs[jj + start, ii])
+            ax = axs[jj * l + ii]
 
-
-            if jj < dim-1:
+            if jj < dim - 1:
                 ax.tick_params(axis='x', bottom=False, top=False, labelbottom=False)
             else:
                 ax.tick_params(axis='x', bottom=True, top=False, labelbottom=True)
@@ -254,21 +243,20 @@ def scatter_matrix(samples, #list of chains
                 ax.tick_params(axis='y', left=True, right=False, labelleft=True)
                 if labels:
                     ax.set_ylabel(labels[jj], fontsize='14')
-                    
-            ax.set_frame_on(True)     
+
+            ax.set_frame_on(True)
 
             for kk in range(nchains):
+                color = colors[kk % len(colors)]  # Use Seaborn colors
                 if hist_plot is True:
                     ax.hist2d(samples[kk][:, ii], samples[kk][:, jj],
                               bins=nbins,
                               norm=mcolors.PowerNorm(gamma),
                               density=True,
-                              cmap=plt.cm.jet)
-                    # ax.tick_params(axis='x', which='major', labelsize=6)
+                              cmap=plt.cm.jet,
+                              cmin=1e-3)   # Ensuring the plots are visible with some minimum
                 else:
-                    ax.plot(samples[kk][:, ii], samples[kk][:, jj], 'o', ms=1, alpha=gamma)
-
-                # ax.hist2d(samples[kk][:, ii], samples[kk][:, jj], bins=nbins)
+                    ax.plot(samples[kk][:, ii], samples[kk][:, jj], 'o', ms=1, alpha=gamma, color=color)
 
             if specials is not None:
                 for special in specials:
@@ -278,27 +266,23 @@ def scatter_matrix(samples, #list of chains
                     else:
                         ax.plot(special['vals'][ii], special['vals'][jj], 'x',
                                 ms=2, mew=2)
-            
-            # ax.axhline(means[jj], color='red', linestyle='--', lw=2)
-            # ax.axvline(means[ii], color='red', linestyle='--', lw=2)
 
             ax.set_xlim((use_mins[ii], use_maxs[ii]))
-            ax.set_ylim((use_mins[jj]-1e-10, use_maxs[jj]+1e-10))
+            ax.set_ylim((use_mins[jj] - 1e-10, use_maxs[jj] + 1e-10))
 
-            # Setting two tick marks manually
-            diff = 0.2*(use_maxs[ii]-use_mins[ii])
-            xticks = np.linspace(use_mins[ii]+diff, use_maxs[ii]-diff, 2)
-            yticks = np.linspace(use_mins[jj]+diff, use_maxs[jj]-diff, 2)
+            diff = 0.2 * (use_maxs[ii] - use_mins[ii])
+            xticks = np.linspace(use_mins[ii] + diff, use_maxs[ii] - diff, 2)
+            yticks = np.linspace(use_mins[jj] + diff, use_maxs[jj] - diff, 2)
             ax.set_xticks(xticks)
             ax.set_yticks(yticks)
 
-            # Setting the formatter
             ax.xaxis.set_major_formatter(formatter)
             ax.yaxis.set_major_formatter(formatter)
 
-    plt.tight_layout(pad=0.01);
+    plt.tight_layout(pad=0.01)
+    
     if upper_right is not None:
-        size_ur = int(dim/2)
+        size_ur = int(dim / 2)
 
         name = upper_right['name']
         vals = upper_right['vals']
@@ -306,14 +290,14 @@ def scatter_matrix(samples, #list of chains
             log_transform = upper_right['log_transform']
         else:
             log_transform = None
-        ax = fig.add_subplot(gs[0:int(dim/2),
-                                size_ur+1:size_ur+int(dim/2)+1])
+        ax = fig.add_subplot(gs[0:int(dim / 2),
+                                size_ur + 1:size_ur + int(dim / 2) + 1])
 
         lb = np.min([np.quantile(val, 0.01) for val in vals])
         ub = np.max([np.quantile(val, 0.99) for val in vals])
         for kk in range(nchains):
             if log_transform is not None:
-                pv = np.log10(vals[kk]) 
+                pv = np.log10(vals[kk])
                 ra = (np.log10(lb), np.log10(ub))
             else:
                 pv = vals[kk]
@@ -330,21 +314,19 @@ def scatter_matrix(samples, #list of chains
         ax.set_frame_on(True)
         ax.set_xlabel(name, fontsize='14')
 
-        # Setting two tick marks manually for the upper-right subplot
-        diff = 0.2*(ra[1]-ra[0])
-        xticks = np.linspace(ra[0]+diff, ra[1]-diff, 2)
+        diff = 0.2 * (ra[1] - ra[0])
+        xticks = np.linspace(ra[0] + diff, ra[1] - diff, 2)
         yticks = ax.get_yticks()
         if len(yticks) >= 2:
             yticks = np.linspace(yticks[0], yticks[-1], 2)
         ax.set_xticks(xticks)
         ax.set_yticks(yticks)
 
-        # Setting the formatter
         ax.xaxis.set_major_formatter(formatter)
         ax.yaxis.set_major_formatter(formatter)
 
-
     plt.subplots_adjust(left=0.15, right=0.95)
+
     return fig, axs, gs
 
 def plot_trace(samples, labels=None, output_fname='.' ):
